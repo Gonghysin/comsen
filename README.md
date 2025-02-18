@@ -1,10 +1,10 @@
-# consem
-华中科技大学光实2401龚海心在consem实验室中的项目
+# comsen
+华中科技大学光实2401龚海心在comsen实验室中的项目
 
 
 ## 2024.1.28 项目日志
 
-今天完成了consem实验室布置的寒假作业项目 - 房价预测。
+今天完成了comsen实验室布置的寒假作业项目 - 房价预测。
 
 ### 项目概述
 - 项目来源：Kaggle竞赛 [House Prices - Advanced Regression Techniques](https://www.kaggle.com/c/house-prices-advanced-regression-techniques)
