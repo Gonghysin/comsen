@@ -1,6 +1,12 @@
 # comsen
 华中科技大学光实2401龚海心在comsen实验室中的项目
 
+# 项目日志
+
+## 2025.2.27 项目日志
+添加了AI赋能电解液预测亲和能和电离能的项目
+挑战杯项目
+
 ## 2025.2.26 项目日志
 重构了项目结构
 
@@ -8,7 +14,12 @@
 
 今天完成了comsen实验室布置的寒假作业项目 - 房价预测。
 
-### 项目概述
+# 项目列表
+## 电解液能量预测
+- 项目目录：`ai_dianjieye`
+
+## 房价预测
+- 项目目录：`fangjiayuce`
 - 项目来源：Kaggle竞赛 [House Prices - Advanced Regression Techniques](https://www.kaggle.com/c/house-prices-advanced-regression-techniques)
 - 目标：预测房屋销售价格
 - 参考代码：[House Prices Prediction using TFDF](https://www.kaggle.com/code/gusthema/house-prices-prediction-using-tfdf)
