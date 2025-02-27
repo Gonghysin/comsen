@@ -76,6 +76,11 @@ def train_model(dataframe):
     checkpoint_path = 'model_checkpoint.pt'
     training_state_path = 'training_state.json'
     
+    print("数据预览：")
+    print(dataframe.head())
+    print("\n数据统计：")
+    print(dataframe.describe())
+    
     # 首先创建数据集
     dataset = []
     for index, row in dataframe.iterrows():
@@ -84,19 +89,29 @@ def train_model(dataframe):
             graph.y = torch.tensor([row['y']], dtype=torch.float)
             dataset.append(graph)
     
-    # 计算y值的均值和标准差
+    # 检查原始y值的分布
     y_values = torch.tensor([data.y.item() for data in dataset])
-    y_mean = y_values.mean()
-    y_std = y_values.std()
+    print("\n目标值统计：")
+    print(f"最小值: {y_values.min().item():.4f}")
+    print(f"最大值: {y_values.max().item():.4f}")
+    print(f"均值: {y_values.mean().item():.4f}")
+    print(f"标准差: {y_values.std().item():.4f}")
     
-    # 标准化y值
+    # 使用稳健的标准化方法
+    y_median = y_values.median()
+    y_iqr = torch.quantile(y_values, 0.75) - torch.quantile(y_values, 0.25)
+    y_min = y_values.min()
+    y_max = y_values.max()
+    
+    # 使用Min-Max标准化而不是Z-score标准化
     for data in dataset:
-        data.y = (data.y - y_mean) / y_std
+        data.y = (data.y - y_min) / (y_max - y_min)  # 将值缩放到0-1范围
     
     # 划分训练集和验证集
     train_size = int(0.8 * len(dataset))
-    train_dataset = dataset[:train_size]
-    val_dataset = dataset[train_size:]
+    indices = torch.randperm(len(dataset))  # 随机打乱数据
+    train_dataset = [dataset[i] for i in indices[:train_size]]
+    val_dataset = [dataset[i] for i in indices[train_size:]]
     
     train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False)
@@ -105,12 +120,11 @@ def train_model(dataframe):
     if os.path.exists(checkpoint_path) and os.path.exists(training_state_path):
         print("发现已有检查点，加载模型配置...")
         checkpoint = torch.load(checkpoint_path)
-        # 从检查点获取模型维度
         model_dim = checkpoint['model_state_dict']['lin0.weight'].size(0)
         print(f"使用检查点中的模型维度: {model_dim}")
     else:
         print("未发现检查点，使用默认模型配置...")
-        model_dim = 64  # 使用原来的维度
+        model_dim = 64
     
     model = MolecularGraph(num_features=1, dim=model_dim)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.0005, weight_decay=1e-4)
@@ -121,6 +135,12 @@ def train_model(dataframe):
         patience=10,
         min_lr=1e-6
     )
+    
+    # 保存标准化参数
+    normalization_params = {
+        'y_min': y_min.item(),
+        'y_max': y_max.item()
+    }
     
     # 初始化训练状态
     start_epoch = 0
@@ -199,8 +219,8 @@ def train_model(dataframe):
             'val_losses': val_losses,
             'best_val_loss': best_val_loss,
             'patience_counter': patience_counter,
-            'y_mean': y_mean.item(),
-            'y_std': y_std.item()
+            'y_min': y_min.item(),
+            'y_max': y_max.item()
         }
         with open(training_state_path, 'w') as f:
             json.dump(training_state, f)
@@ -214,8 +234,8 @@ def train_model(dataframe):
                 torch.save({
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
-                    'y_mean': y_mean,
-                    'y_std': y_std
+                    'y_min': y_min,
+                    'y_max': y_max
                 }, 'best_model.pt')
             else:
                 patience_counter += 1
@@ -243,9 +263,9 @@ def train_model(dataframe):
         for batch in val_loader:
             out = model(batch)
             # 反标准化预测值
-            pred = out * y_std + y_mean
+            pred = out * (best_checkpoint['y_max'] - best_checkpoint['y_min']) + best_checkpoint['y_min']
             predictions.extend(pred.numpy())
-            true_values.extend((batch.y * y_std + y_mean).numpy())
+            true_values.extend((batch.y * (best_checkpoint['y_max'] - best_checkpoint['y_min']) + best_checkpoint['y_min']).numpy())
     
     plot_prediction_results(predictions, true_values)
 
@@ -281,6 +301,13 @@ def plot_prediction_results(predictions, true_values):
     plt.xlabel('Actual Values')
     plt.ylabel('Predicted Values')
     plt.grid(True)
+    
+    # 添加更多统计信息
+    stats_text = f'Predictions:\nMean: {np.mean(predictions):.2f}\nStd: {np.std(predictions):.2f}\n'
+    stats_text += f'Min: {np.min(predictions):.2f}\nMax: {np.max(predictions):.2f}\n'
+    plt.text(0.05, 0.95, stats_text, transform=plt.gca().transAxes, 
+             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
     plt.savefig('prediction_results.png')
     plt.close()
 
@@ -290,8 +317,8 @@ def predict(smiles, model_path='best_model.pt'):
     checkpoint = torch.load(model_path)
     model = MolecularGraph(num_features=1, dim=64)
     model.load_state_dict(checkpoint['model_state_dict'])
-    y_mean = checkpoint['y_mean']
-    y_std = checkpoint['y_std']
+    y_min = checkpoint['y_min']
+    y_max = checkpoint['y_max']
     
     model.eval()
     graph = smiles_to_graph(smiles)
@@ -301,19 +328,33 @@ def predict(smiles, model_path='best_model.pt'):
     with torch.no_grad():
         out = model(graph)
         # 反标准化预测值
-        prediction = out.item() * y_std + y_mean
+        prediction = out.item() * (y_max - y_min) + y_min
     return prediction
 
 if __name__ == "__main__":
-    # 直接用逗号分隔读取数据
+    # 读取CSV文件，跳过表头行
     df = pd.read_csv('ai_dianjieye/smiles_affinity.csv', 
-                     names=['x', 'y'],  # 指定列名
-                     sep=',',           # 使用逗号作为分隔符
-                     dtype={'x': str, 'y': float})  # 指定数据类型
+                     header=0,
+                     dtype={'x': str, 'y': float})
     
-    print("数据预览：")
-    print(df.head())
-    print("\n数据信息：")
-    print(df.info())
+    print("原始数据统计：")
+    print(df.describe())
+    print(f"原始数据量: {len(df)}")
+    
+    # 移除-5到5范围外的数据
+    df = df[(df['y'] >= -5) & (df['y'] <= 5)]
+    
+    print("\n过滤后数据统计：")
+    print(df.describe())
+    print(f"过滤后数据量: {len(df)}")
+    
+    # 绘制过滤后的数据分布
+    plt.figure(figsize=(10, 6))
+    plt.hist(df['y'], bins=50)
+    plt.title('Distribution of y values (filtered)')
+    plt.xlabel('y')
+    plt.ylabel('Count')
+    plt.savefig('y_distribution.png')
+    plt.close()
     
     train_model(df)
